@@ -32,7 +32,7 @@ def get_db_connection():
 def process_job(job):
     job_id = job['id']
     storage_key = job['storage_key']
-    
+
     # Handle storage key to full URL using Supabase Storage
     if not storage_key.startswith("http"):
         if SUPABASE_STORAGE_BASE_URL:
@@ -62,11 +62,11 @@ def process_job(job):
 
         # 3. Parse PDF
         records = extract_records_from_bytes(pdf_bytes)
-        
+
         # 4. Insert directly into Database (leads_raw)
         inserted_count = 0
         skipped_count = 0
-        
+
         with get_db_connection() as conn:
             with conn.cursor() as cur:
                 insert_query = """
@@ -76,7 +76,7 @@ def process_job(job):
                     VALUES (%s, %s, %s, %s, %s, %s, %s)
                     ON CONFLICT ("Faculdade", "Ano", "Nome") DO NOTHING
                 """
-                
+
                 # Prepare batch data
                 batch_data = [
                     (
@@ -90,7 +90,7 @@ def process_job(job):
                     )
                     for r in records
                 ]
-                
+
                 if batch_data:
                     from psycopg2.extras import execute_batch
                     # Note: execute_batch doesn't easily return row counts for ON CONFLICT DO NOTHING in generic driver
@@ -98,17 +98,17 @@ def process_job(job):
                     # For simplicity/performance in batch, we just execute.
                     # If we really need stats, execute_values with RETURNING is an option but more complex with ON CONFLICT.
                     # Let's assume all processed.
-                    
+
                     execute_batch(cur, insert_query, batch_data)
                     conn.commit()
-                    
+
                     # Since we can't easily count inserted vs skipped in simple batch without return,
-                    # we'll report total extracted as processed. 
+                    # we'll report total extracted as processed.
                     # If strict stats are needed, we would need a loop or more complex query.
                     inserted_count = len(batch_data) # This is technically "processed items count"
-                
+
         print(f"Processed {len(records)} records for {faculdade} {ano}")
-            
+
         stats = json.dumps({
             "extracted": len(records),
             "inserted": inserted_count, # Approx (includes skipped in this simple implementation)
@@ -124,7 +124,7 @@ def process_job(job):
                     (stats, job_id)
                 )
                 conn.commit()
-        
+
         print(f"Job {job_id} completed successfully")
 
     except Exception as e:
@@ -146,14 +146,14 @@ def process_pending_jobs_task():
         with get_db_connection() as conn:
             with conn.cursor() as cur:
                 # Fetch pending jobs
-                cur.execute("SELECT * FROM imports WHERE status = 'queued_parse' OR status = 'pending'")
+                cur.execute("SELECT * FROM imports WHERE status = 'queued_parse' OR status = 'pending' OR status = 'failed'")
                 jobs = cur.fetchall()
-        
+
         print(f"Found {len(jobs)} pending jobs")
-        
+
         for job in jobs:
             process_job(job)
-            
+
     except Exception as e:
         print(f"Error fetching jobs: {e}")
 
