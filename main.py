@@ -22,6 +22,7 @@ app.add_middleware(
 
 DATABASE_URL = os.environ.get("DATABASE_URL")
 NEXTJS_API_URL = os.environ.get("NEXTJS_API_URL", "http://localhost:3000")
+SUPABASE_STORAGE_BASE_URL = os.environ.get("SUPABASE_STORAGE_BASE_URL")
 
 def get_db_connection():
     if not DATABASE_URL:
@@ -30,11 +31,22 @@ def get_db_connection():
 
 def process_job(job):
     job_id = job['id']
-    storage_key = job['storage_key'] # This is the URL of the blob
+    storage_key = job['storage_key']
+    
+    # Handle storage key to full URL using Supabase Storage
+    if not storage_key.startswith("http"):
+        if SUPABASE_STORAGE_BASE_URL:
+            # Ensure no double slashes if both end/start with /
+            base = SUPABASE_STORAGE_BASE_URL.rstrip('/')
+            path = storage_key.lstrip('/')
+            storage_key = f"{base}/{path}"
+        else:
+            print(f"Warning: Job {job_id} has relative storage_key '{storage_key}' but SUPABASE_STORAGE_BASE_URL is not set.")
+
     faculdade = job['Faculdade']
     ano = job['Ano']
 
-    print(f"Processing job {job_id} for {faculdade} {ano}")
+    print(f"Processing job {job_id} for {faculdade} {ano}. URL: {storage_key}")
 
     try:
         # 1. Update status to parsing
