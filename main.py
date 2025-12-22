@@ -7,7 +7,13 @@ from psycopg2.extras import RealDictCursor
 import requests
 import io
 import json
-from parsers.dispatcher import extract_records_from_bytes_for_faculdade
+try:
+    # Deployment/runtime often imports this file as top-level `main.py`, with
+    # `api/` as the working directory on sys.path.
+    from parsers.dispatcher import extract_records_from_bytes_for_faculdade
+except ModuleNotFoundError:
+    # Local development may import as a package: `import api.main`.
+    from api.parsers.dispatcher import extract_records_from_bytes_for_faculdade
 
 app = FastAPI(title="SiSU PDF Parser API")
 
