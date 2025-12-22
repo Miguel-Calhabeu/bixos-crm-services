@@ -163,6 +163,7 @@ def process_job(job):
 
                     INSERT INTO public.dimension_lead (
                       nome,
+                                            responsavel_nome,
                       "Ano",
                       "Faculdade",
                       "Curso",
@@ -174,6 +175,7 @@ def process_job(job):
                     )
                     SELECT
                       s."Nome" as nome,
+                                            cr.responsavel_nome,
                       s."Ano",
                       s."Faculdade",
                       s."Curso",
@@ -183,8 +185,11 @@ def process_job(job):
                       s.created_at as source_silver_created_at,
                       now() as updated_at
                     FROM public.leads_silver s
+                                        LEFT JOIN public.course_responsavel cr
+                                            ON cr.curso = s."Curso"
                     ON CONFLICT (nome) DO UPDATE
                     SET
+                                            responsavel_nome = COALESCE(public.dimension_lead.responsavel_nome, EXCLUDED.responsavel_nome),
                       "Ano" = EXCLUDED."Ano",
                       "Faculdade" = EXCLUDED."Faculdade",
                       "Curso" = EXCLUDED."Curso",
