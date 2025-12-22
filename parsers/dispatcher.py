@@ -12,6 +12,7 @@ from __future__ import annotations
 from typing import Callable, Iterable, Mapping, Any
 
 from .ufscar import extract_records_from_bytes as extract_ufscar
+from .fuvest import extract_records_from_bytes as extract_fuvest
 
 
 ParserFn = Callable[[bytes], list[dict]]
@@ -23,9 +24,9 @@ def _norm_faculdade(faculdade: str | None) -> str:
 
 _REGISTRY: dict[str, ParserFn] = {
     "ufscar": extract_ufscar,
-    "fuvest": extract_ufscar,
+    "fuvest": extract_fuvest,
     "enem usp": extract_ufscar,
-    "provao paulista (fuvest)": extract_ufscar,
+    "provao paulista (fuvest)": extract_fuvest,
     "ifsp": extract_ufscar,
 }
 
