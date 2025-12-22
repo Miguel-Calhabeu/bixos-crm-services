@@ -25,9 +25,9 @@ def _norm_faculdade(faculdade: str | None) -> str:
 _REGISTRY: dict[str, ParserFn] = {
     "ufscar": extract_ufscar,
     "fuvest": extract_fuvest,
-    "enem usp": extract_ufscar,
-    "provao paulista (fuvest)": extract_fuvest,
-    "ifsp": extract_ufscar,
+    "enem usp": extract_provao,
+    "provao paulista (fuvest)": extract_provao,
+    "ifsp": extract_ifsp,
 }
 
 
