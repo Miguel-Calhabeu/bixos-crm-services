@@ -7,7 +7,7 @@ from psycopg2.extras import RealDictCursor
 import requests
 import io
 import json
-from pdf_parser import extract_records_from_bytes
+from api.parsers.dispatcher import extract_records_from_bytes_for_faculdade
 
 app = FastAPI(title="SiSU PDF Parser API")
 
@@ -59,8 +59,8 @@ def process_job(job):
         response.raise_for_status()
         pdf_bytes = response.content
 
-        # 3. Parse PDF
-        records = extract_records_from_bytes(pdf_bytes)
+        # 3. Parse PDF (select parser by faculdade)
+        records = extract_records_from_bytes_for_faculdade(pdf_bytes, faculdade)
 
         # 4. Insert directly into Database (leads_raw)
         inserted_count = 0
@@ -70,9 +70,9 @@ def process_job(job):
             with conn.cursor() as cur:
                 insert_query = """
                     INSERT INTO public.leads_raw (
-                        "Faculdade", "Ano", "Nome", "Curso", "Tipo", "Periodo", "Campus"
+                        "Faculdade", "Ano", "Nome", "Curso", "Tipo", "Periodo"
                     )
-                    VALUES (%s, %s, %s, %s, %s, %s, %s)
+                    VALUES (%s, %s, %s, %s, %s, %s)
                     ON CONFLICT ("Faculdade", "Ano", "Nome") DO NOTHING
                 """
 
@@ -83,8 +83,7 @@ def process_job(job):
                         r['nome'],
                         r['curso'],
                         r['tipo'],
-                        r['periodo'],
-                        r['campus']
+                        r['periodo']
                     )
                     for r in records
                 ]
@@ -110,7 +109,6 @@ def process_job(job):
                         "Curso",
                         "Tipo",
                         "Periodo",
-                        "Campus",
                         created_at
                       FROM public.leads_raw
                       ORDER BY "Nome", created_at DESC
@@ -123,7 +121,6 @@ def process_job(job):
                         "Curso" = src."Curso",
                         "Tipo" = src."Tipo",
                         "Periodo" = src."Periodo",
-                        "Campus" = src."Campus",
                         created_at = src.created_at,
                         updated_at = now()
                     WHEN NOT MATCHED THEN
@@ -134,7 +131,6 @@ def process_job(job):
                         "Curso",
                         "Tipo",
                         "Periodo",
-                        "Campus",
                         created_at,
                         updated_at
                       )
@@ -145,7 +141,6 @@ def process_job(job):
                         src."Curso",
                         src."Tipo",
                         src."Periodo",
-                        src."Campus",
                         src.created_at,
                         now()
                       );
@@ -169,7 +164,6 @@ def process_job(job):
                       "Curso",
                       "Tipo",
                       "Periodo",
-                      "Campus",
                       source_silver_created_at,
                       updated_at
                     )
@@ -181,7 +175,6 @@ def process_job(job):
                       s."Curso",
                       s."Tipo",
                       s."Periodo",
-                      s."Campus",
                       s.created_at as source_silver_created_at,
                       now() as updated_at
                     FROM public.leads_silver s
@@ -195,12 +188,27 @@ def process_job(job):
                       "Curso" = EXCLUDED."Curso",
                       "Tipo" = EXCLUDED."Tipo",
                       "Periodo" = EXCLUDED."Periodo",
-                      "Campus" = EXCLUDED."Campus",
                       source_silver_created_at = EXCLUDED.source_silver_created_at,
                       updated_at = now()
                     WHERE
                       public.dimension_lead.source_silver_created_at IS NULL
                       OR EXCLUDED.source_silver_created_at > public.dimension_lead.source_silver_created_at;
+                    """
+                )
+                conn.commit()
+
+        # 4d. Seed initial CRM status for leads that don't have any events yet
+        # Important: do NOT overwrite existing CRM history.
+        with get_db_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    INSERT INTO public.fact_crm (lead_id, status, observacoes, changed_by)
+                    SELECT d.lead_id, 'Novo'::text AS status, NULL::text AS observacoes, 'pipeline'::text AS changed_by
+                    FROM public.dimension_lead d
+                    WHERE NOT EXISTS (
+                        SELECT 1 FROM public.fact_crm f WHERE f.lead_id = d.lead_id
+                    );
                     """
                 )
                 conn.commit()
