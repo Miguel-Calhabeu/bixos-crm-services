@@ -21,7 +21,6 @@ app.add_middleware(
 )
 
 DATABASE_URL = os.environ.get("DATABASE_URL")
-NEXTJS_API_URL = os.environ.get("NEXTJS_API_URL", "http://localhost:3000")
 SUPABASE_STORAGE_BASE_URL = os.environ.get("SUPABASE_STORAGE_BASE_URL")
 
 def get_db_connection():
@@ -77,7 +76,6 @@ def process_job(job):
                     ON CONFLICT ("Faculdade", "Ano", "Nome") DO NOTHING
                 """
 
-                # Prepare batch data
                 batch_data = [
                     (
                         faculdade,
@@ -93,19 +91,114 @@ def process_job(job):
 
                 if batch_data:
                     from psycopg2.extras import execute_batch
-                    # Note: execute_batch doesn't easily return row counts for ON CONFLICT DO NOTHING in generic driver
-                    # So we might not get exact 'inserted' vs 'skipped' counts easily without RETURNING or checking before.
-                    # For simplicity/performance in batch, we just execute.
-                    # If we really need stats, execute_values with RETURNING is an option but more complex with ON CONFLICT.
-                    # Let's assume all processed.
-
                     execute_batch(cur, insert_query, batch_data)
                     conn.commit()
+                    inserted_count = len(batch_data)
 
-                    # Since we can't easily count inserted vs skipped in simple batch without return,
-                    # we'll report total extracted as processed.
-                    # If strict stats are needed, we would need a loop or more complex query.
-                    inserted_count = len(batch_data) # This is technically "processed items count"
+        # 4b. Merge raw -> silver (keep the latest created_at per "Nome")
+        # Note: This relies on Postgres MERGE (PG15+) support.
+        with get_db_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    MERGE INTO public.leads_silver AS tgt
+                    USING (
+                      SELECT DISTINCT ON ("Nome")
+                        "Nome",
+                        "Ano",
+                        "Faculdade",
+                        "Curso",
+                        "Tipo",
+                        "Periodo",
+                        "Campus",
+                        created_at
+                      FROM public.leads_raw
+                      ORDER BY "Nome", created_at DESC
+                    ) AS src
+                    ON (tgt."Nome" = src."Nome")
+                    WHEN MATCHED AND src.created_at > tgt.created_at THEN
+                      UPDATE SET
+                        "Ano" = src."Ano",
+                        "Faculdade" = src."Faculdade",
+                        "Curso" = src."Curso",
+                        "Tipo" = src."Tipo",
+                        "Periodo" = src."Periodo",
+                        "Campus" = src."Campus",
+                        created_at = src.created_at,
+                        updated_at = now()
+                    WHEN NOT MATCHED THEN
+                      INSERT (
+                        "Nome",
+                        "Ano",
+                        "Faculdade",
+                        "Curso",
+                        "Tipo",
+                        "Periodo",
+                        "Campus",
+                        created_at,
+                        updated_at
+                      )
+                      VALUES (
+                        src."Nome",
+                        src."Ano",
+                        src."Faculdade",
+                        src."Curso",
+                        src."Tipo",
+                        src."Periodo",
+                        src."Campus",
+                        src.created_at,
+                        now()
+                      );
+                    """
+                )
+                conn.commit()
+
+        # 4c. Upsert silver -> dimension_lead (seed CRM dimension)
+        with get_db_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    CREATE UNIQUE INDEX IF NOT EXISTS dimension_lead_nome_uq
+                      ON public.dimension_lead (nome);
+
+                    INSERT INTO public.dimension_lead (
+                      nome,
+                      "Ano",
+                      "Faculdade",
+                      "Curso",
+                      "Tipo",
+                      "Periodo",
+                      "Campus",
+                      source_silver_created_at,
+                      updated_at
+                    )
+                    SELECT
+                      s."Nome" as nome,
+                      s."Ano",
+                      s."Faculdade",
+                      s."Curso",
+                      s."Tipo",
+                      s."Periodo",
+                      s."Campus",
+                      s.created_at as source_silver_created_at,
+                      now() as updated_at
+                    FROM public.leads_silver s
+                    ON CONFLICT (nome) DO UPDATE
+                    SET
+                      "Ano" = EXCLUDED."Ano",
+                      "Faculdade" = EXCLUDED."Faculdade",
+                      "Curso" = EXCLUDED."Curso",
+                      "Tipo" = EXCLUDED."Tipo",
+                      "Periodo" = EXCLUDED."Periodo",
+                      "Campus" = EXCLUDED."Campus",
+                      source_silver_created_at = EXCLUDED.source_silver_created_at,
+                      updated_at = now()
+                    WHERE
+                      public.dimension_lead.source_silver_created_at IS NULL
+                      OR EXCLUDED.source_silver_created_at > public.dimension_lead.source_silver_created_at;
+                    """
+                )
+                conn.commit()
 
         print(f"Processed {len(records)} records for {faculdade} {ano}")
 
