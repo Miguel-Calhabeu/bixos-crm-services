@@ -25,6 +25,7 @@ _REGISTRY: dict[str, ParserFn] = {
     "ufscar": extract_ufscar,
     "fuvest": extract_ufscar,
     "enem usp": extract_ufscar,
+    "provao paulista (fuvest)": extract_ufscar,
     "ifsp": extract_ufscar,
 }
 
