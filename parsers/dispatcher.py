@@ -22,10 +22,10 @@ def _norm_faculdade(faculdade: str | None) -> str:
 
 
 _REGISTRY: dict[str, ParserFn] = {
-    # Accept a few normalizations/aliases.
     "ufscar": extract_ufscar,
-    "universidade federal de são carlos": extract_ufscar,
-    "universidade federal de sao carlos": extract_ufscar,
+    "fuvest": extract_ufscar,
+    "enem usp": extract_ufscar,
+    "ifsp": extract_ufscar,
 }
 
 
@@ -37,5 +37,5 @@ def extract_records_from_bytes_for_faculdade(file_bytes: bytes, faculdade: str |
     """
 
     key = _norm_faculdade(faculdade)
-    fn = _REGISTRY.get(key) or extract_ufscar
-    return fn(file_bytes)
+    fn = _REGISTRY.get(key)
+    return fn(file_bytes) if fn else []

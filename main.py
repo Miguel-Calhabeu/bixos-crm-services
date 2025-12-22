@@ -271,7 +271,7 @@ def process_pending_jobs_task():
 
 @app.get("/")
 def read_root():
-    return {"status": "ok", "message": "SiSU Parser API is running"}
+    return {"status": "ok", "message": "PDF Parser API is running"}
 
 @app.post("/process-jobs")
 async def trigger_job_processing(background_tasks: BackgroundTasks):
