@@ -7,7 +7,7 @@ from psycopg2.extras import RealDictCursor
 import requests
 import io
 import json
-from api.parsers.dispatcher import extract_records_from_bytes_for_faculdade
+from parsers.dispatcher import extract_records_from_bytes_for_faculdade
 
 app = FastAPI(title="SiSU PDF Parser API")
 
