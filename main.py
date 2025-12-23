@@ -29,6 +29,15 @@ app.add_middleware(
 DATABASE_URL = os.environ.get("DATABASE_URL")
 SUPABASE_STORAGE_BASE_URL = os.environ.get("SUPABASE_STORAGE_BASE_URL")
 
+processo_faculdade_map = {
+    "ufscar": "UFSCar",
+    "fuvest": "USP",
+    "enem usp": "USP",
+    "provao paulista (fuvest)": "USP",
+    "fuvest lista de espera": "USP",
+    "ifsp": "IFSP",
+}
+
 def get_db_connection():
     if not DATABASE_URL:
         raise Exception("DATABASE_URL environment variable not set")
@@ -84,7 +93,7 @@ def process_job(job):
 
                 batch_data = [
                     (
-                        faculdade,
+                        processo_faculdade_map.get(faculdade.lower(), faculdade),
                         int(ano),
                         r['nome'],
                         r['curso'],
