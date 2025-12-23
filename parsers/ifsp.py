@@ -68,3 +68,18 @@ def extract_records_from_bytes(file_bytes: bytes) -> List[dict]:
         deduped.append(r)
 
     return [asdict(r) for r in deduped]
+
+if __name__ == "__main__":
+    import sys
+    from pprint import pprint
+
+    if len(sys.argv) != 2:
+        print("Usage: python ifsp.py <pdf-file>")
+        sys.exit(1)
+
+    pdf_path = sys.argv[1]
+    with open(pdf_path, "rb") as f:
+        pdf_bytes = f.read()
+
+    results = extract_records_from_bytes(pdf_bytes)
+    pprint(results)

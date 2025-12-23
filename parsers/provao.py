@@ -95,3 +95,12 @@ def extract_records_from_bytes(file_bytes: bytes) -> List[dict]:
         deduped.append(r)
 
     return [asdict(r) for r in deduped]
+
+if __name__ == "__main__":
+    import sys
+    from pprint import pprint
+
+    with open(sys.argv[1], "rb") as f:
+        data = f.read()
+    records = extract_records_from_bytes(data)
+    pprint(records)

@@ -150,3 +150,18 @@ def extract_records_from_bytes(file_bytes: bytes) -> List[dict]:
         deduped.append(r)
 
     return [asdict(r) for r in deduped]
+
+if __name__ == "__main__":
+    import sys
+
+    if len(sys.argv) != 2:
+        print(f"Usage: {sys.argv[0]} <fuvest-pdf-file>", file=sys.stderr)
+        sys.exit(1)
+
+    pdf_path = Path(sys.argv[1])
+    with pdf_path.open("rb") as f:
+        file_bytes = f.read()
+
+    records = extract_records_from_bytes(file_bytes)
+    for record in records:
+        print(record)
