@@ -13,6 +13,8 @@ from typing import Callable, Iterable, Mapping, Any
 
 from .ufscar import extract_records_from_bytes as extract_ufscar
 from .fuvest import extract_records_from_bytes as extract_fuvest
+from .provao import extract_records_from_bytes as extract_provao
+from .ifsp import extract_records_from_bytes as extract_ifsp
 
 
 ParserFn = Callable[[bytes], list[dict]]
