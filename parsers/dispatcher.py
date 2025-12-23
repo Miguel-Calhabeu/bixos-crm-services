@@ -15,6 +15,7 @@ from .ufscar import extract_records_from_bytes as extract_ufscar
 from .fuvest import extract_records_from_bytes as extract_fuvest
 from .provao import extract_records_from_bytes as extract_provao
 from .ifsp import extract_records_from_bytes as extract_ifsp
+from .enem_usp import extract_records_from_bytes as extract_enem_usp
 
 
 ParserFn = Callable[[bytes], list[dict]]
