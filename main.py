@@ -2,6 +2,7 @@ from fastapi import FastAPI, BackgroundTasks, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
 import os
+import time
 import psycopg2
 from psycopg2.extras import RealDictCursor
 import requests
@@ -43,6 +44,27 @@ def get_db_connection():
         raise Exception("DATABASE_URL environment variable not set")
     return psycopg2.connect(DATABASE_URL, cursor_factory=RealDictCursor)
 
+
+def _now_ms() -> int:
+    return int(time.time() * 1000)
+
+
+def _log(job_id: str, msg: str) -> None:
+    # Keep logs single-line for Vercel readability.
+    print(f"[{_now_ms()}][job:{job_id}] {msg}")
+
+
+class _StepTimer:
+    def __init__(self, job_id: str, step: str):
+        self.job_id = job_id
+        self.step = step
+        self._t0 = time.perf_counter()
+
+    def done(self, extra: str = "") -> None:
+        dt_ms = (time.perf_counter() - self._t0) * 1000
+        suffix = f" | {extra}" if extra else ""
+        _log(self.job_id, f"{self.step} done in {dt_ms:.1f}ms{suffix}")
+
 def process_job(job):
     job_id = job['id']
     storage_key = job['storage_key']
@@ -60,27 +82,39 @@ def process_job(job):
     faculdade = job['Faculdade']
     ano = job['Ano']
 
-    print(f"Processing job {job_id} for {faculdade} {ano}. URL: {storage_key}")
+    _log(str(job_id), f"Processing job for faculdade={faculdade!r} ano={ano!r} url={storage_key}")
 
     try:
         # 1. Update status to parsing
+        t = _StepTimer(str(job_id), "db:update_status_parsing")
         with get_db_connection() as conn:
             with conn.cursor() as cur:
                 cur.execute("UPDATE imports SET status = 'parsing', updated_at = NOW() WHERE id = %s", (job_id,))
                 conn.commit()
+        t.done()
 
         # 2. Download PDF
-        response = requests.get(storage_key)
+        t = _StepTimer(str(job_id), "http:download_pdf")
+        # Avoid hanging network calls in serverless runtimes.
+        # (connect timeout, read timeout)
+        response = requests.get(storage_key, timeout=(10, 60))
         response.raise_for_status()
         pdf_bytes = response.content
+        size = len(pdf_bytes)
+        cl = response.headers.get("content-length")
+        ct = response.headers.get("content-type")
+        t.done(extra=f"status={response.status_code} bytes={size} content_length={cl} content_type={ct}")
 
         # 3. Parse PDF (select parser by faculdade)
+        t = _StepTimer(str(job_id), "parse:extract_records")
         records = extract_records_from_bytes_for_faculdade(pdf_bytes, faculdade)
+        t.done(extra=f"records={len(records)}")
 
         # 4. Insert directly into Database (leads_raw)
         inserted_count = 0
         skipped_count = 0
 
+        t = _StepTimer(str(job_id), "db:insert_leads_raw")
         with get_db_connection() as conn:
             with conn.cursor() as cur:
                 insert_query = """
@@ -108,9 +142,11 @@ def process_job(job):
                     execute_batch(cur, insert_query, batch_data)
                     conn.commit()
                     inserted_count = len(batch_data)
+        t.done(extra=f"batch={inserted_count}")
 
         # 4b. Merge raw -> silver (keep the latest created_at per "Nome")
         # Note: This relies on Postgres MERGE (PG15+) support.
+        t = _StepTimer(str(job_id), "db:merge_raw_to_silver")
         with get_db_connection() as conn:
             with conn.cursor() as cur:
                 cur.execute(
@@ -162,8 +198,10 @@ def process_job(job):
                     """
                 )
                 conn.commit()
+        t.done()
 
         # 4c. Upsert silver -> dimension_lead (seed CRM dimension)
+        t = _StepTimer(str(job_id), "db:upsert_silver_to_dimension")
         with get_db_connection() as conn:
             with conn.cursor() as cur:
                 cur.execute(
@@ -211,9 +249,11 @@ def process_job(job):
                     """
                 )
                 conn.commit()
+                t.done()
 
         # 4d. Seed initial CRM status for leads that don't have any events yet
         # Important: do NOT overwrite existing CRM history.
+                t = _StepTimer(str(job_id), "db:seed_fact_crm")
         with get_db_connection() as conn:
             with conn.cursor() as cur:
                 cur.execute(
@@ -227,8 +267,9 @@ def process_job(job):
                     """
                 )
                 conn.commit()
+        t.done()
 
-        print(f"Processed {len(records)} records for {faculdade} {ano}")
+        _log(str(job_id), f"Processed records={len(records)} faculdade={faculdade!r} ano={ano!r}")
 
         stats = json.dumps({
             "extracted": len(records),
@@ -238,6 +279,7 @@ def process_job(job):
         })
 
         # 5. Update status to completed
+        t = _StepTimer(str(job_id), "db:update_status_completed")
         with get_db_connection() as conn:
             with conn.cursor() as cur:
                 cur.execute(
@@ -245,12 +287,14 @@ def process_job(job):
                     (stats, job_id)
                 )
                 conn.commit()
+        t.done(extra=f"stats_json_len={len(stats)}")
 
-        print(f"Job {job_id} completed successfully")
+        _log(str(job_id), "Job completed successfully")
 
     except Exception as e:
-        print(f"Job {job_id} failed: {e}")
+        _log(str(job_id), f"Job failed: {type(e).__name__}: {e}")
         try:
+            t = _StepTimer(str(job_id), "db:update_status_failed")
             with get_db_connection() as conn:
                 with conn.cursor() as cur:
                     cur.execute(
@@ -258,8 +302,9 @@ def process_job(job):
                         (str(e), job_id)
                     )
                     conn.commit()
+            t.done()
         except Exception as db_e:
-            print(f"Failed to update error status for job {job_id}: {db_e}")
+            _log(str(job_id), f"Failed to update error status: {type(db_e).__name__}: {db_e}")
 
 def process_pending_jobs_task():
     print("Starting background job processing...")
